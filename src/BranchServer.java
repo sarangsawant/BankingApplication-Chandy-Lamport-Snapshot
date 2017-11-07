@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class BranchServer {
 
@@ -45,6 +46,7 @@ public class BranchServer {
 				Socket socket = serverSocket.accept();
 				InputStream inputStream = socket.getInputStream();
 				
+				//Init branch message from controller
 				branchMsg = Bank.BranchMessage.parseFrom(inputStream);
 				if(branchMsg.hasInitBranch()) {
 					branchServer.initializeBranchDetails(branchMsg);
@@ -63,25 +65,22 @@ public class BranchServer {
 						BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 						String name = in.readLine();
 						
-						String ip = socket.getInetAddress().getHostAddress();
-						int port = socket.getPort();
-						
-						//System.out.println("Received connection from " + name + " " + ip + " " + port);
 						map.put(name, socket);
 						establishedTcpConnections+=1;
 						
-						branchServer.syncTCPConnectionsAndStartMoneyTransfer();
-						
+						//Start listening for messages and then start money transfer
 						new BranchHandler(socket).start();
+						branchServer.syncTCPConnectionsAndStartMoneyTransfer();
 						
 				} catch (IOException e) {
 					e.printStackTrace();
 				}
-				
 			}
-			
 	}
 	
+	/**
+	 * Set up TCP connections with the Branches after itself in the branch list
+	 */
 	private void setUpTCPConnections() {
 		int i=0;
 		for(i=0; i<allBranchDetails.getInitBranch().getAllBranchesCount(); i++) {
@@ -111,22 +110,13 @@ public class BranchServer {
 				map.put(name, socket);
 				establishedTcpConnections+=1;
 				
+				//Start listening for messages and then start money transfer
+				new BranchHandler(socket).start();
 				syncTCPConnectionsAndStartMoneyTransfer();
 				
-				//Establish TCP connection and wait for incoming messages
-				new BranchHandler(socket).start();
 				
 		}
 		
-	}
-	
-	private void printMap() {
-		System.out.println("----------------Map------------");
-		Iterator it = map.entrySet().iterator();
-	    while (it.hasNext()) {
-	        Map.Entry pair = (Map.Entry)it.next();
-	        System.out.println(pair.getKey() + " = " + pair.getValue());
-	    }
 	}
 	
 	private static class BranchHandler extends Thread {
@@ -154,6 +144,9 @@ public class BranchServer {
         }
     }
     
+	/**
+	 * This method starts money transfer only after it has established all the tcp connections with remaining all branches
+	 */
 	public void syncTCPConnectionsAndStartMoneyTransfer() {
 		int expectedConnections = allBranchDetails.getInitBranch().getAllBranchesCount()-1;
 		
@@ -164,6 +157,20 @@ public class BranchServer {
 		}
 		
 	}
+	
+	private void printMap() {
+		System.out.println("----------------Map------------");
+		Iterator it = map.entrySet().iterator();
+	    while (it.hasNext()) {
+	        Map.Entry pair = (Map.Entry)it.next();
+	        System.out.println(pair.getKey() + " = " + pair.getValue());
+	    }
+	}
+	
+	/**
+	 * This method is used to initialize initial branch balance, branch balance and other branch details
+	 * @param branchMsg
+	 */
 	private void initializeBranchDetails(Bank.BranchMessage branchMsg) {
 		
 		branchInitialBalance = branchMsg.getInitBranch().getBalance();
@@ -171,29 +178,33 @@ public class BranchServer {
 		
 		allBranchDetails = branchMsg;
 		
+		System.out.println("---------------------------------");
+		
 		System.out.println("Branch initial amount " + branchBalance);
 		
 		for(Bank.InitBranch.Branch branch : allBranchDetails.getInitBranch().getAllBranchesList()) {
 			System.out.println(branch.getName() + " " + branch.getIp() + " " + branch.getPort());
 		}
+		
+		System.out.println("---------------------------------");
+		System.out.println();
 	}
 	
 	
 	/**
-	 * 
+	 * This method generates a random number and returns the branch name of the index of generated random number
 	 * @return
 	 */
 	private String getRandomBranchName() {
 		String name = null;
 		
 		int totalBranches = allBranchDetails.getInitBranch().getAllBranchesCount();
-		Random random = new Random();
-		
-		//(High-low)+low, High is size-1, low is 0
-		int index = random.nextInt((totalBranches-1) - 0);
+
+		//nextInt(min,max) -> min is inclusive and max is exclusive
+		int index = ThreadLocalRandom.current().nextInt(0, totalBranches);
 		
 		while(allBranchDetails.getInitBranch().getAllBranches(index).getName().equals(branchName)) {
-			index = random.nextInt((totalBranches-1) - 0);
+			index = ThreadLocalRandom.current().nextInt(0, totalBranches);
 		}
 
 		name = allBranchDetails.getInitBranch().getAllBranches(index).getName();
@@ -208,9 +219,11 @@ public class BranchServer {
 		int amount = 0;
 		int low = (int) (0.01*branchInitialBalance);
 		int high = (int) (0.05*branchInitialBalance);
-		Random random = new Random();
-		amount = random.nextInt(high-low)+low;
+		
+		//nextInt(min,max) -> min is inclusive and max is exclusive
+		amount = ThreadLocalRandom.current().nextInt(low, high+1);
 		if((branchBalance-amount) > 0) {
+			System.out.println("Before Transfer:: " + branchBalance);
 			branchBalance = branchBalance - amount;
 		}else
 			amount = 0;
@@ -224,9 +237,9 @@ public class BranchServer {
 	 */
 	private static synchronized void updateBalance(int amount){
 		System.out.println();
-		System.out.println("Money Received!! Updating balance " + branchBalance + "+" + amount);
+		System.out.print("Received(" + branchBalance + "+" + amount + ")");
 		branchBalance = branchBalance + amount;
-		System.out.println("Balance " + branchName + "::"+branchBalance);
+		System.out.print(" = " + branchBalance);
 		System.out.println();
 	}
 	
@@ -246,23 +259,19 @@ public class BranchServer {
 					Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
 					branchMsgBuilder.setTransfer(transferMsgBuilder);
 					
-					System.out.println("Transfering money " + branchName + "->" +branch + "::" + transferAmount);
-					System.out.println("Current Balance:: " + branchBalance);
+					System.out.println("Transfering:(" + transferAmount + "->" + branch + ")==" + branchBalance);
 					System.out.println();
-					
 					branchMsgBuilder.build().writeDelimitedTo(clientSocket.getOutputStream());
 				}
 				
+				//Transfer amount 
 				long sleepTime = (long)(Math.random()*(5000));
 				Thread.sleep(sleepTime);
 			} catch (UnknownHostException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}catch (InterruptedException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
