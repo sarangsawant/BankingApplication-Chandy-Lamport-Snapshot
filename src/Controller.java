@@ -1,8 +1,6 @@
 import java.io.BufferedReader;
-import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
@@ -82,7 +80,6 @@ public class Controller {
 		for(Bank.InitBranch.Branch branch : branchBuilder.getAllBranchesList()) {
 			Socket clientSocket;
 			try {
-				System.out.println("connecting to " + branch.getIp() +  branch.getPort());
 				clientSocket = new Socket(branch.getIp(), branch.getPort());
 				OutputStream outputStream = clientSocket.getOutputStream();
 				branchMsgBuilder.build().writeTo(outputStream);
@@ -96,32 +93,6 @@ public class Controller {
 				e.printStackTrace();
 			}
 		}
-		
-		
-		List<String> list = new ArrayList<>();
-		
-		for(Bank.InitBranch.Branch branch : branchBuilder.getAllBranchesList()) {
-			Socket clientSocket;
-			try {
-				System.out.println("connecting to " + branch.getIp() +  branch.getPort());
-				clientSocket = new Socket(branch.getIp(), branch.getPort());
-				OutputStream outputStream = clientSocket.getOutputStream();
-				
-				ObjectOutputStream objectOutputStream = new ObjectOutputStream(outputStream);
-				objectOutputStream.writeObject(list);
-				
-				list.add(branch.getName());
-				clientSocket.close();
-			} catch (UnknownHostException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
-		
-		
 	}
 
 }
