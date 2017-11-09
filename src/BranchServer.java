@@ -2,15 +2,19 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class BranchServer {
@@ -28,6 +32,8 @@ public class BranchServer {
 	static int flag=0;
 	
 	private final Object lock = new Object();
+	
+	private ConcurrentHashMap<Integer, Bank.ReturnSnapshot.LocalSnapshot.Builder> snapshots = new ConcurrentHashMap<Integer, Bank.ReturnSnapshot.LocalSnapshot.Builder>();
 	
 	public static void main(String[] args) {
 		if(args.length != 2){
@@ -78,7 +84,8 @@ public class BranchServer {
 								branchServer.syncTCPConnectionsAndStartMoneyTransfer();	
 							}else {
 								Bank.BranchMessage msg = Bank.BranchMessage.parseFrom(socket.getInputStream());
-								System.out.println("Received snap shot message " + msg.getInitSnapshot().getSnapshotId());
+								System.out.println("\nReceived snapshot message " + msg.getInitSnapshot().getSnapshotId());
+								branchServer.initiateLocalSnapshotProcedure(msg.getInitSnapshot().getSnapshotId());
 							}
 						
 				} catch (IOException e) {
@@ -137,14 +144,27 @@ public class BranchServer {
  
         public void run() {
         	try {
-				while(true) {
+				/*while(true) {
 					Bank.BranchMessage branchMessage = Bank.BranchMessage.parseDelimitedFrom(clientSocket.getInputStream());
 					//System.out.println("Amount received-> " + branchMessage.getTransfer().getMoney());
 					if(branchMessage.hasTransfer()) {
 						int amount = branchMessage.getTransfer().getMoney();
 						branchServer.updateBalance(amount);
 					}
-				}
+				}*/
+        		InputStream inputStream = clientSocket.getInputStream();
+        		
+        		Bank.BranchMessage branchMessage = null;
+        		while( (branchMessage = Bank.BranchMessage.parseDelimitedFrom(inputStream)) != null){
+        			if(branchMessage.hasTransfer()) {
+						int amount = branchMessage.getTransfer().getMoney();
+						branchServer.updateBalance(amount);
+					}
+        			
+        			if(branchMessage.hasMarker()) {
+        				branchServer.receiveMarkerMessage();
+        			}
+        		}
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -168,6 +188,67 @@ public class BranchServer {
 		
 	}
 	
+	/**
+	 * This function is used to initiaite snapshot for local branch
+	 * Step 1: Record its own local state (Mark as 1st marker received)
+	 * step 2: Send marker Messages to other branches
+	 * step 3: start recording on incoming channel
+	 */
+	private void initiateLocalSnapshotProcedure(int id) {
+		int localState = branchBalance;
+		int snapshotId = id;
+		List<Integer> channelState = new ArrayList<>();
+		
+		Bank.ReturnSnapshot.LocalSnapshot.Builder localSnapshotBuilder = Bank.ReturnSnapshot.LocalSnapshot.newBuilder();
+		localSnapshotBuilder.setBalance(localState);
+		localSnapshotBuilder.setSnapshotId(snapshotId);
+		localSnapshotBuilder.addAllChannelState(channelState);
+		
+		snapshots.put(snapshotId, localSnapshotBuilder);
+		
+		Bank.Marker.Builder markerMsg = Bank.Marker.newBuilder();
+		markerMsg.setSnapshotId(snapshotId);
+		
+		sendMarkerMessagesToOtherBranches(markerMsg);
+		
+		//Start recording on incoming channels
+		
+		
+	}
+	
+	private void sendMarkerMessagesToOtherBranches(Bank.Marker.Builder marker) {
+		Bank.BranchMessage.Builder branchMesssageBuilder  = Bank.BranchMessage.newBuilder();
+		branchMesssageBuilder.setMarker(marker);
+		
+		Iterator it = map.entrySet().iterator();
+	    while (it.hasNext()) {
+	        Map.Entry pair = (Map.Entry)it.next();
+	        if(!pair.getKey().equals(branchName)) {
+	        	System.out.println("----Sending marker message to----- " + pair.getKey());
+	        	Socket soc = map.get(pair.getKey());
+	        	
+	        	OutputStream outputStream;
+				try {
+					outputStream = soc.getOutputStream();
+					branchMesssageBuilder.build().writeDelimitedTo(outputStream);
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				
+	        }
+	    }
+	}
+	
+	/**
+	 * Implementation details after receiving first marker message
+	 * Step 1: If it is first marker message(For particular snapshot id)
+	 * 			a: Record its own state(balance)
+	 * 			b: Mark channel as empty 
+	 */
+	private void receiveMarkerMessage() {
+		System.out.println("--------Marker Message received---------");
+	}
 	private void printMap() {
 		System.out.println("----------------Map------------");
 		Iterator it = map.entrySet().iterator();
@@ -232,13 +313,14 @@ public class BranchServer {
 		
 		//nextInt(min,max) -> min is inclusive and max is exclusive
 		amount = ThreadLocalRandom.current().nextInt(low, high+1);
-		if((branchBalance-amount) > 0) {
-			System.out.println("Before Transfer:: " + branchBalance);
-			synchronized (lock) {
-				branchBalance = branchBalance - amount;
-			}
-		}else
-			amount = 0;
+		System.out.println();
+		synchronized (lock) {
+			if((branchBalance-amount) > 0) {
+				System.out.println("Before Transfer:: " + branchBalance);
+					branchBalance = branchBalance - amount;
+			}else
+				amount = 0;
+		}
 		
 		return amount;
 	}
@@ -249,8 +331,9 @@ public class BranchServer {
 	 */
 	private void updateBalance(int amount){
 		System.out.println();
-		System.out.print("Received(" + branchBalance + "+" + amount + ")");
+		
 		synchronized (lock) {
+			System.out.print("Received(" + branchBalance + "+" + amount + ")");
 			branchBalance = branchBalance + amount;
 		}
 		System.out.print(" = " + branchBalance);
@@ -285,7 +368,6 @@ public class BranchServer {
 							branchMsgBuilder.setTransfer(transferMsgBuilder);
 							
 							System.out.println("Transfering:(" + transferAmount + "->" + branch + ")==" + branchBalance);
-							System.out.println();
 							branchMsgBuilder.build().writeDelimitedTo(clientSocket.getOutputStream());
 						}
 						
