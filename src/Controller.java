@@ -8,7 +8,10 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class Controller {
 
@@ -75,14 +78,13 @@ public class Controller {
 		Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
 		branchMsgBuilder.setInitBranch(branchBuilder);
 		
-		
+		Socket clientSocket;
 		for(Bank.InitBranch.Branch branch : branchBuilder.getAllBranchesList()) {
-			Socket clientSocket;
 			try {
 				clientSocket = new Socket(branch.getIp(), branch.getPort());
 				OutputStream outputStream = clientSocket.getOutputStream();
 				branchMsgBuilder.build().writeTo(outputStream);
-							
+				
 				clientSocket.close();
 			} catch (UnknownHostException e) {
 				e.printStackTrace();
@@ -90,6 +92,44 @@ public class Controller {
 				e.printStackTrace();
 			}
 		}
+		
+		try {
+			Thread.sleep(5000L);
+		} catch (InterruptedException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		
+		//Initiate snapshot message
+		//Map<String, Socket> branchConnections = new HashMap<>();
+		Socket soc = null;
+		int snapshotId = 1;
+		//nextInt(min,max) -> min is inclusive and max is exclusive
+		int randomIndex = ThreadLocalRandom.current().nextInt(0, branchBuilder.getAllBranchesCount());
+		
+		String branchName = branchBuilder.getAllBranches(randomIndex).getName();
+		String ip = branchBuilder.getAllBranches(randomIndex).getIp();
+		int port = branchBuilder.getAllBranches(randomIndex).getPort();
+		
+		System.out.println("Sending Initate snapshot message to " + branchName + " " + ip + " " + port);
+		
+		Bank.InitSnapshot.Builder initSnapshotBuilder = Bank.InitSnapshot.newBuilder();
+		initSnapshotBuilder.setSnapshotId(snapshotId);
+		
+		Bank.BranchMessage.Builder branchMesssageBuilder  = Bank.BranchMessage.newBuilder();
+		branchMesssageBuilder.setInitSnapshot(initSnapshotBuilder);
+		
+		try {
+			soc = new Socket(ip, port);
+			OutputStream outputStream = soc.getOutputStream();
+			branchMesssageBuilder.build().writeTo(outputStream);
+		} catch (UnknownHostException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		
+		
 	}
 
 }

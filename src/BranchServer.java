@@ -23,6 +23,11 @@ public class BranchServer {
 	Bank.BranchMessage allBranchDetails;
 	static Map<String, Socket> map = new HashMap<>();
 	static int establishedTcpConnections = 0;
+
+	//Flag to differentiate Branch messages and simple string messages
+	static int flag=0;
+	
+	private final Object lock = new Object();
 	
 	public static void main(String[] args) {
 		if(args.length != 2){
@@ -57,20 +62,24 @@ public class BranchServer {
 				e.printStackTrace();
 			}
 		
-			
 			while(true) {
 				try {
 						Socket socket = serverSocket.accept();
-					
-						BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-						String name = in.readLine();
 						
-						map.put(name, socket);
-						establishedTcpConnections+=1;
-						
-						//Start listening for messages and then start money transfer
-						new BranchHandler(socket).start();
-						branchServer.syncTCPConnectionsAndStartMoneyTransfer();
+							if(flag == 0) {
+								BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+								String name = in.readLine();
+								
+								map.put(name, socket);
+								establishedTcpConnections+=1;
+								
+								//Start listening for messages and then start money transfer
+								new BranchHandler(socket,branchServer).start();
+								branchServer.syncTCPConnectionsAndStartMoneyTransfer();	
+							}else {
+								Bank.BranchMessage msg = Bank.BranchMessage.parseFrom(socket.getInputStream());
+								System.out.println("Received snap shot message " + msg.getInitSnapshot().getSnapshotId());
+							}
 						
 				} catch (IOException e) {
 					e.printStackTrace();
@@ -111,30 +120,29 @@ public class BranchServer {
 				establishedTcpConnections+=1;
 				
 				//Start listening for messages and then start money transfer
-				new BranchHandler(socket).start();
+				new BranchHandler(socket, this).start();
 				syncTCPConnectionsAndStartMoneyTransfer();
-				
-				
 		}
 		
 	}
 	
 	private static class BranchHandler extends Thread {
         private Socket clientSocket;
+        private BranchServer branchServer;
         
-        public BranchHandler(Socket socket) {
+        public BranchHandler(Socket socket, BranchServer server) {
             clientSocket = socket;
+            branchServer = server;
         }
  
         public void run() {
         	try {
-				
 				while(true) {
 					Bank.BranchMessage branchMessage = Bank.BranchMessage.parseDelimitedFrom(clientSocket.getInputStream());
 					//System.out.println("Amount received-> " + branchMessage.getTransfer().getMoney());
 					if(branchMessage.hasTransfer()) {
 						int amount = branchMessage.getTransfer().getMoney();
-						BranchServer.updateBalance(amount);
+						branchServer.updateBalance(amount);
 					}
 				}
 			} catch (IOException e) {
@@ -152,7 +160,9 @@ public class BranchServer {
 		
 		if(expectedConnections == establishedTcpConnections) {
 			System.out.println("Yeah!!!All connections established, Starting transactions");
+			flag = 1;
 			printMap();
+			
 			transferMoneyToAllBranches();
 		}
 		
@@ -215,7 +225,7 @@ public class BranchServer {
 	 * Get random amount between 1% to 5% of branch initial amount. Return 0 if amount cannot be transfered
 	 * @return
 	 */
-	private synchronized int getAmountToTransfer() {
+	private int getAmountToTransfer() {
 		int amount = 0;
 		int low = (int) (0.01*branchInitialBalance);
 		int high = (int) (0.05*branchInitialBalance);
@@ -224,7 +234,9 @@ public class BranchServer {
 		amount = ThreadLocalRandom.current().nextInt(low, high+1);
 		if((branchBalance-amount) > 0) {
 			System.out.println("Before Transfer:: " + branchBalance);
-			branchBalance = branchBalance - amount;
+			synchronized (lock) {
+				branchBalance = branchBalance - amount;
+			}
 		}else
 			amount = 0;
 		
@@ -235,46 +247,58 @@ public class BranchServer {
 	 * Update branch balance by specified amount
 	 * @param amount
 	 */
-	private static synchronized void updateBalance(int amount){
+	private void updateBalance(int amount){
 		System.out.println();
 		System.out.print("Received(" + branchBalance + "+" + amount + ")");
-		branchBalance = branchBalance + amount;
+		synchronized (lock) {
+			branchBalance = branchBalance + amount;
+		}
 		System.out.print(" = " + branchBalance);
 		System.out.println();
 	}
 	
 	private void transferMoneyToAllBranches() {
 				
-		while(true){
-			String branch = getRandomBranchName();
-			Socket clientSocket;
-			try {
-				clientSocket = map.get(branch);
-				Bank.Transfer.Builder transferMsgBuilder = Bank.Transfer.newBuilder();
-				int transferAmount = getAmountToTransfer();
-				
-				if(transferAmount > 0) {
-					transferMsgBuilder.setMoney(transferAmount);
+		Thread sendMoneyThread = new Thread() {
+			public void run() {
+				System.out.println("Thread to transfer money started");
+				while(true){
+					//Transfer amount 
+					long sleepTime = (long)(Math.random()*(5000));
+					try {
+						Thread.sleep(sleepTime);
+					} catch (InterruptedException e1) {
+						e1.printStackTrace();
+					}
 					
-					Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
-					branchMsgBuilder.setTransfer(transferMsgBuilder);
-					
-					System.out.println("Transfering:(" + transferAmount + "->" + branch + ")==" + branchBalance);
-					System.out.println();
-					branchMsgBuilder.build().writeDelimitedTo(clientSocket.getOutputStream());
+					String branch = getRandomBranchName();
+					Socket clientSocket;
+					try {
+						clientSocket = map.get(branch);
+						Bank.Transfer.Builder transferMsgBuilder = Bank.Transfer.newBuilder();
+						int transferAmount = getAmountToTransfer();
+						
+						if(transferAmount > 0) {
+							transferMsgBuilder.setMoney(transferAmount);
+							
+							Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
+							branchMsgBuilder.setTransfer(transferMsgBuilder);
+							
+							System.out.println("Transfering:(" + transferAmount + "->" + branch + ")==" + branchBalance);
+							System.out.println();
+							branchMsgBuilder.build().writeDelimitedTo(clientSocket.getOutputStream());
+						}
+						
+					} catch (UnknownHostException e) {
+						e.printStackTrace();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
 				}
-				
-				//Transfer amount 
-				long sleepTime = (long)(Math.random()*(5000));
-				Thread.sleep(sleepTime);
-			} catch (UnknownHostException e) {
-				e.printStackTrace();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}catch (InterruptedException e) {
-				e.printStackTrace();
 			}
-		}
+		};
+		
+		sendMoneyThread.start();
 		
 	}
 		
