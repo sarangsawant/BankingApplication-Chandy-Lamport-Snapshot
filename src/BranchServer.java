@@ -33,7 +33,9 @@ public class BranchServer {
 	
 	private final Object lock = new Object();
 	
-	private ConcurrentHashMap<Integer, Bank.ReturnSnapshot.LocalSnapshot.Builder> snapshots = new ConcurrentHashMap<Integer, Bank.ReturnSnapshot.LocalSnapshot.Builder>();
+	private ConcurrentHashMap<Integer, Integer> branchState = new ConcurrentHashMap<>();
+	private ConcurrentHashMap<Integer, Map<String, Integer>> incomingChannelStates = new ConcurrentHashMap<>();
+	private ConcurrentHashMap<Integer, Map<String, Integer>> finalChannelStates = new ConcurrentHashMap<>();
 	
 	public static void main(String[] args) {
 		if(args.length != 2){
@@ -58,7 +60,7 @@ public class BranchServer {
 				InputStream inputStream = socket.getInputStream();
 				
 				//Init branch message from controller
-				branchMsg = Bank.BranchMessage.parseFrom(inputStream);
+				branchMsg = Bank.BranchMessage.parseDelimitedFrom(inputStream);
 				if(branchMsg.hasInitBranch()) {
 					branchServer.initializeBranchDetails(branchMsg);
 					branchServer.setUpTCPConnections();
@@ -80,12 +82,21 @@ public class BranchServer {
 								establishedTcpConnections+=1;
 								
 								//Start listening for messages and then start money transfer
-								new BranchHandler(socket,branchServer).start();
+								new BranchHandler(socket,branchServer, name).start();
 								branchServer.syncTCPConnectionsAndStartMoneyTransfer();	
 							}else {
-								Bank.BranchMessage msg = Bank.BranchMessage.parseFrom(socket.getInputStream());
-								System.out.println("\nReceived snapshot message " + msg.getInitSnapshot().getSnapshotId());
-								branchServer.initiateLocalSnapshotProcedure(msg.getInitSnapshot().getSnapshotId());
+								Bank.BranchMessage msg = Bank.BranchMessage.parseDelimitedFrom(socket.getInputStream());
+								
+								if(msg.hasInitSnapshot()){
+									System.out.println("------\nReceived snapshot message from controller" + msg.getInitSnapshot().getSnapshotId() +"--------");
+									branchServer.initiateLocalSnapshotProcedure(msg.getInitSnapshot().getSnapshotId());
+								}
+								
+								if(msg.hasRetrieveSnapshot()) {
+									System.out.println();
+									System.out.println("======Received Retrieve snapshot msg from controller=====");
+									branchServer.returnSnapshotToController(msg.getRetrieveSnapshot().getSnapshotId());
+								}
 							}
 						
 				} catch (IOException e) {
@@ -127,7 +138,7 @@ public class BranchServer {
 				establishedTcpConnections+=1;
 				
 				//Start listening for messages and then start money transfer
-				new BranchHandler(socket, this).start();
+				new BranchHandler(socket, this, name).start();
 				syncTCPConnectionsAndStartMoneyTransfer();
 		}
 		
@@ -136,10 +147,12 @@ public class BranchServer {
 	private static class BranchHandler extends Thread {
         private Socket clientSocket;
         private BranchServer branchServer;
+        private String fromBranch;
         
-        public BranchHandler(Socket socket, BranchServer server) {
+        public BranchHandler(Socket socket, BranchServer server, String name) {
             clientSocket = socket;
             branchServer = server;
+            fromBranch = name;
         }
  
         public void run() {
@@ -159,10 +172,11 @@ public class BranchServer {
         			if(branchMessage.hasTransfer()) {
 						int amount = branchMessage.getTransfer().getMoney();
 						branchServer.updateBalance(amount);
+						branchServer.updateAmountForAllRecordingChannels(amount, fromBranch);
 					}
         			
         			if(branchMessage.hasMarker()) {
-        				branchServer.receiveMarkerMessage();
+        				branchServer.receiveMarkerMessage(branchMessage.getMarker().getSnapshotId(), fromBranch);
         			}
         		}
 			} catch (IOException e) {
@@ -194,36 +208,35 @@ public class BranchServer {
 	 * step 2: Send marker Messages to other branches
 	 * step 3: start recording on incoming channel
 	 */
-	private void initiateLocalSnapshotProcedure(int id) {
-		int localState = branchBalance;
-		int snapshotId = id;
-		List<Integer> channelState = new ArrayList<>();
+	private void initiateLocalSnapshotProcedure(int snapshotId) {
 		
-		Bank.ReturnSnapshot.LocalSnapshot.Builder localSnapshotBuilder = Bank.ReturnSnapshot.LocalSnapshot.newBuilder();
-		localSnapshotBuilder.setBalance(localState);
-		localSnapshotBuilder.setSnapshotId(snapshotId);
-		localSnapshotBuilder.addAllChannelState(channelState);
+		//Record local state
+		recordLocalState(snapshotId);
 		
-		snapshots.put(snapshotId, localSnapshotBuilder);
-		
+		//start recording for other channels
+		startRecordingForIncomingChannel(snapshotId);
+
+		//send marker to other branches
 		Bank.Marker.Builder markerMsg = Bank.Marker.newBuilder();
 		markerMsg.setSnapshotId(snapshotId);
-		
 		sendMarkerMessagesToOtherBranches(markerMsg);
-		
-		//Start recording on incoming channels
-		
-		
+
 	}
 	
+	/**
+	 * This function sends marker messages to all branches except itself
+	 * @param marker
+	 */
 	private void sendMarkerMessagesToOtherBranches(Bank.Marker.Builder marker) {
 		Bank.BranchMessage.Builder branchMesssageBuilder  = Bank.BranchMessage.newBuilder();
 		branchMesssageBuilder.setMarker(marker);
 		
+		//Map<String, Integer> recordingMap = incomingChannelStates.get(snapshotId);
 		Iterator it = map.entrySet().iterator();
+		
 	    while (it.hasNext()) {
 	        Map.Entry pair = (Map.Entry)it.next();
-	        if(!pair.getKey().equals(branchName)) {
+	        	System.out.println();
 	        	System.out.println("----Sending marker message to----- " + pair.getKey());
 	        	Socket soc = map.get(pair.getKey());
 	        	
@@ -232,11 +245,8 @@ public class BranchServer {
 					outputStream = soc.getOutputStream();
 					branchMesssageBuilder.build().writeDelimitedTo(outputStream);
 				} catch (IOException e) {
-					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
-				
-	        }
 	    }
 	}
 	
@@ -246,10 +256,120 @@ public class BranchServer {
 	 * 			a: Record its own state(balance)
 	 * 			b: Mark channel as empty 
 	 */
-	private void receiveMarkerMessage() {
-		System.out.println("--------Marker Message received---------");
+	private void receiveMarkerMessage(int snapshotId, String fromBranch) {
+		List<Integer> channelState = new ArrayList<>();
+		
+		//If Key is present, first marker message already received
+		if(branchState.containsKey(snapshotId)){
+			System.out.println();
+			System.out.println("------------Received marker from-------- " + fromBranch );
+			recordFinalChannelStateAndStopRecording(snapshotId,fromBranch);
+			
+		}else {
+			//First Marker message
+			System.out.println();
+			System.out.println("-------------My First Marker message--------from " + fromBranch);
+			//Record local state
+			recordLocalState(snapshotId);
+			
+			//Make incoming channel empty
+			Map<String, Integer> map = getInitializeMap();
+			map.put(fromBranch, 0);
+			incomingChannelStates.put(snapshotId, map);
+			recordFinalChannelStateAndStopRecording(snapshotId,fromBranch);
+			
+			//send marker messages
+			Bank.Marker.Builder markerMsg = Bank.Marker.newBuilder();
+			markerMsg.setSnapshotId(snapshotId);
+			sendMarkerMessagesToOtherBranches(markerMsg);
+			
+			//start recording for other channels
+			//startRecordingForIncomingChannel(snapshotId);
+		}
 	}
+	
+	private void recordFinalChannelStateAndStopRecording(int snapshotId, String fromBranch) {
+		Map<String, Integer> map; 
+		if(!finalChannelStates.contains(snapshotId)) {
+			map = new HashMap<>();
+			finalChannelStates.put(snapshotId, map);
+		}
+		
+		int recordedBalance = incomingChannelStates.get(snapshotId).get(fromBranch);
+		finalChannelStates.get(snapshotId).put(fromBranch, recordedBalance);
+		
+		//stop recording i.e remove entry from incomingChannelStates
+		incomingChannelStates.get(snapshotId).remove(fromBranch);
+	}
+	
+	private void updateAmountForAllRecordingChannels(int amount, String fromBranch) {
+		Iterator it = incomingChannelStates.entrySet().iterator();
+	    while (it.hasNext()) {
+	        Map.Entry pair = (Map.Entry)it.next();
+	        Map<String, Integer> channelMap = incomingChannelStates.get(pair.getKey());
+	        
+	        if(channelMap.containsKey(fromBranch)) {
+	        	int updatedBal;
+	        	
+	        	if(channelMap.get(fromBranch) == -1)
+	        		updatedBal = amount;
+	        	else
+		        	updatedBal = amount + channelMap.get(fromBranch);
+
+	        	channelMap.put(fromBranch, updatedBal);
+	        	incomingChannelStates.put((Integer) pair.getKey(), channelMap);
+	        }
+	    }
+		
+	}
+	
+	private void startRecordingForIncomingChannel(int snapshotId) {
+		Map<String, Integer> incomingChannelMap = getInitializeMap();
+		incomingChannelStates.put(snapshotId, incomingChannelMap);
+	}
+	
+	private void recordLocalState(int snapshotId) {
+		branchState.put(snapshotId, branchBalance);
+	}
+	
+	private Map<String, Integer> getInitializeMap(){
+		Map<String, Integer> channelMap = new HashMap<>();
+
+		Iterator it = map.entrySet().iterator();
+	    while (it.hasNext()) {
+	        Map.Entry pair = (Map.Entry)it.next();
+	        System.out.println((String)pair.getKey());
+	        channelMap.put((String) pair.getKey(), -1);
+	    }
+	    return channelMap;
+	}
+	
+	private void returnSnapshotToController(int snapshotId) {
+		System.out.println("--Retrieving snapshot for-- " + snapshotId);
+		
+		Bank.ReturnSnapshot.LocalSnapshot.Builder localBuilder = Bank.ReturnSnapshot.LocalSnapshot.newBuilder();
+		localBuilder.setSnapshotId(snapshotId);
+		localBuilder.setBalance(branchState.get(snapshotId));
+		
+		System.out.println(branchName + ": " + branchState.get(snapshotId));
+		Map<String, Integer> channelMap = finalChannelStates.get(snapshotId);
+		
+		List<Integer> list = new ArrayList<>();
+		for(Bank.InitBranch.Branch branch : allBranchDetails.getInitBranch().getAllBranchesList()) {
+			if(channelMap.get(branch.getName()) != null) {
+				System.out.println(branchName + "<-" + branch.getName() + ":" + channelMap.get(branch.getName()));
+				list.add(channelMap.get(branch.getName()));
+				
+			}
+		}
+		
+		localBuilder.addAllChannelState(list);
+		
+		
+	}
+	
 	private void printMap() {
+		System.out.println();
 		System.out.println("----------------Map------------");
 		Iterator it = map.entrySet().iterator();
 	    while (it.hasNext()) {
@@ -269,6 +389,7 @@ public class BranchServer {
 		
 		allBranchDetails = branchMsg;
 		
+		//initialize incoming channel states
 		System.out.println("---------------------------------");
 		
 		System.out.println("Branch initial amount " + branchBalance);
@@ -381,8 +502,6 @@ public class BranchServer {
 		};
 		
 		sendMoneyThread.start();
-		
 	}
 		
-
 }
