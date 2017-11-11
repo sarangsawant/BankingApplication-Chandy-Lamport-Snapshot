@@ -57,6 +57,8 @@ public class BranchServer {
 				Bank.BranchMessage branchMsg = null;
 				
 				Socket socket = serverSocket.accept();
+				
+				
 				InputStream inputStream = socket.getInputStream();
 				
 				//Init branch message from controller
@@ -66,6 +68,8 @@ public class BranchServer {
 					branchServer.setUpTCPConnections();
 				}
 				
+				new ControllerHandler(socket, branchServer).start();
+				
 			}catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -73,7 +77,7 @@ public class BranchServer {
 			while(true) {
 				try {
 						Socket socket = serverSocket.accept();
-					
+						//System.out.println("connection accepted");
 						if(flag == 0) {
 							BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 							String name = in.readLine();
@@ -84,18 +88,19 @@ public class BranchServer {
 							//Start listening for messages and then start money transfer
 							new BranchHandler(socket,branchServer, name).start();
 							branchServer.syncTCPConnectionsAndStartMoneyTransfer();	
-						}else {
+						}/*else {
 							Bank.BranchMessage msg = Bank.BranchMessage.parseDelimitedFrom(socket.getInputStream());
 							
 							if(msg.hasInitSnapshot()){
 								System.out.println("------\nReceived snapshot message from controller:::" + msg.getInitSnapshot().getSnapshotId() +"--------");
-								branchServer.initiateLocalSnapshotProcedure(msg.getInitSnapshot().getSnapshotId());
+								new ControllerHandler(socket, branchServer).start();
+								//branchServer.initiateLocalSnapshotProcedure(msg.getInitSnapshot().getSnapshotId());
 							}
 							
 							if(msg.hasRetrieveSnapshot()) {
 								branchServer.returnSnapshotToController(msg.getRetrieveSnapshot().getSnapshotId());
 							}
-						}
+						}*/
 						
 				} catch (IOException e) {
 					e.printStackTrace();
@@ -141,6 +146,44 @@ public class BranchServer {
 		
 	}
 	
+	private static class ControllerHandler extends Thread {
+        private Socket cSocket;
+        private BranchServer branchServer;
+        
+        public ControllerHandler(Socket socket, BranchServer server) {
+        	cSocket = socket;
+        	branchServer = server;
+        }
+ 
+        public void run() {
+        	try {
+        		InputStream inputStream = cSocket.getInputStream();
+        		Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
+        		
+        		Bank.BranchMessage branchMessage = null;
+        		while( (branchMessage = Bank.BranchMessage.parseDelimitedFrom(inputStream)) != null){
+        			
+        			if(branchMessage.hasInitSnapshot()) {
+        				branchServer.initiateLocalSnapshotProcedure(branchMessage.getInitSnapshot().getSnapshotId());
+        			}
+        			
+        			if(branchMessage.hasRetrieveSnapshot()) {
+        				Bank.ReturnSnapshot returnSnapshot = branchServer.returnSnapshotToController(branchMessage.getRetrieveSnapshot().getSnapshotId());
+        				
+        				branchMsgBuilder  = Bank.BranchMessage.newBuilder();
+        				branchMsgBuilder.setReturnSnapshot(returnSnapshot);
+        				
+        				branchMsgBuilder.build().writeDelimitedTo(cSocket.getOutputStream());
+        			}
+        		}
+        		
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			
+        }
+    }
+	
 	private static class BranchHandler extends Thread {
         private Socket clientSocket;
         private BranchServer branchServer;
@@ -184,7 +227,6 @@ public class BranchServer {
 		if(expectedConnections == establishedTcpConnections) {
 			System.out.println("Yeah!!!All connections established, Starting transactions");
 			flag = 1;
-			//printMap();
 			
 			transferMoneyToAllBranches();
 		}
@@ -226,7 +268,7 @@ public class BranchServer {
 	    while (it.hasNext()) {
 	        Map.Entry pair = (Map.Entry)it.next();
 	        	System.out.println();
-	        	System.out.println("----Sending marker message to----- " + pair.getKey());
+	        	//System.out.println("----Sending marker message to----- " + pair.getKey());
 	        	Socket soc = map.get(pair.getKey());
 	        	
 	        	OutputStream outputStream;
@@ -249,14 +291,14 @@ public class BranchServer {
 		
 		//If Key is present, first marker message already received
 		if(branchState.get(snapshotId) != null){
-			System.out.println();
-			System.out.println("------------Received marker from-------- " + fromBranch );
+			//System.out.println();
+			//System.out.println("------------Received marker from-------- " + fromBranch );
 			recordFinalChannelStateAndStopRecording(snapshotId,fromBranch);
 			
 		}else {
 			//First Marker message
-			System.out.println();
-			System.out.println("-------------My First Marker message--------from " +snapshotId + ":" + fromBranch);
+			//System.out.println();
+			//System.out.println("-------------My First Marker message--------from " +snapshotId + ":" + fromBranch);
 			//Record local state
 			recordLocalState(snapshotId);
 			
@@ -356,9 +398,11 @@ public class BranchServer {
 	    return channelMap;
 	}
 	
-	private void returnSnapshotToController(int snapshotId) {
+	private Bank.ReturnSnapshot returnSnapshotToController(int snapshotId) {
 		System.out.println("------------Retrieving snapshot for-:: " + snapshotId);
-		System.out.println("Size of final channel state map ::" + finalChannelStates.get(snapshotId).size());
+		//System.out.println("Size of final channel state map ::" + finalChannelStates.get(snapshotId).size());
+		Bank.ReturnSnapshot.Builder returnBuilder = Bank.ReturnSnapshot.newBuilder();
+		
 		Bank.ReturnSnapshot.LocalSnapshot.Builder localBuilder = Bank.ReturnSnapshot.LocalSnapshot.newBuilder();
 		localBuilder.setSnapshotId(snapshotId);
 		localBuilder.setBalance(branchState.get(snapshotId));
@@ -370,11 +414,19 @@ public class BranchServer {
 		for(Bank.InitBranch.Branch branch : allBranchDetails.getInitBranch().getAllBranchesList()) {
 			if(channelMap.get(branch.getName()) != null) {
 				System.out.println(branchName + "<-" + branch.getName() + ":" + channelMap.get(branch.getName()));
-				list.add(channelMap.get(branch.getName()));
+				
+				if(channelMap.get(branch.getName()) == -1)
+					list.add(0);
+				else
+					list.add(channelMap.get(branch.getName()));
 			}
 		}
 		
 		localBuilder.addAllChannelState(list);
+		
+		returnBuilder.setLocalSnapshot(localBuilder);
+		
+		return returnBuilder.build();
 	}
 	
 	private void printChannelMap(Map<String, Integer> channelMap, int snapId) {
@@ -387,16 +439,6 @@ public class BranchServer {
 	        System.out.println(pair.getKey() + "::::" + pair.getValue());
 	    }
 	}
-	
-	/*private void printMap() {
-		System.out.println();
-		System.out.println("----------------Map------------");
-		Iterator it = map.entrySet().iterator();
-	    while (it.hasNext()) {
-	        Map.Entry pair = (Map.Entry)it.next();
-	        System.out.println(pair.getKey() + " = " + pair.getValue());
-	    }
-	}*/
 	
 	/**
 	 * This method is used to initialize initial branch balance, branch balance and other branch details
@@ -415,7 +457,7 @@ public class BranchServer {
 		System.out.println("Branch initial amount " + branchBalance);
 		
 		for(Bank.InitBranch.Branch branch : allBranchDetails.getInitBranch().getAllBranchesList()) {
-			System.out.println(branch.getName() + " " + branch.getIp() + " " + branch.getPort());
+			//System.out.println(branch.getName() + " " + branch.getIp() + " " + branch.getPort());
 		}
 		
 		System.out.println("---------------------------------");
@@ -488,9 +530,9 @@ public class BranchServer {
 				System.out.println("Thread to transfer money started");
 				while(true){
 					//Transfer amount 
-					//long sleepTime = (long)(Math.random()*(5000));
+					long sleepTime = (long)(Math.random()*(5000));
 					try {
-						Thread.sleep(250l);
+						Thread.sleep(sleepTime);
 					} catch (InterruptedException e1) {
 						e1.printStackTrace();
 					}
