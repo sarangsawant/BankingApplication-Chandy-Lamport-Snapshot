@@ -405,8 +405,19 @@ public class BranchServer {
 		
 		Bank.ReturnSnapshot.LocalSnapshot.Builder localBuilder = Bank.ReturnSnapshot.LocalSnapshot.newBuilder();
 		localBuilder.setSnapshotId(snapshotId);
-		localBuilder.setBalance(branchState.get(snapshotId));
+		//localBuilder.setBalance(branchState.get(snapshotId));
+	
+		//Wait till snapshot finishes
+		while(finalChannelStates.get(snapshotId) == null && finalChannelStates.get(snapshotId).size() != map.size()){
 		
+			try{
+				Thread.sleep(1000L);
+			}catch(InterruptedException e3){
+				e3.printStackTrace();
+			}	
+
+		}	
+		localBuilder.setBalance(branchState.get(snapshotId));
 		//System.out.println(branchName + ": " + branchState.get(snapshotId));
 		Map<String, Integer> channelMap = finalChannelStates.get(snapshotId);
 		

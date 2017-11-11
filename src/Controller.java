@@ -138,7 +138,8 @@ public class Controller {
         		Bank.BranchMessage branchMessage = Bank.BranchMessage.parseDelimitedFrom(inputStream);
         		if(branchMessage.hasReturnSnapshot()) {
         			List<Integer> list = branchMessage.getReturnSnapshot().getLocalSnapshot().getChannelStateList();
-        			List<String> branchNames = new ArrayList<>();
+        			System.out.println("Size of list " + list.size());
+				List<String> branchNames = new ArrayList<>();
         			
         			//System.out.println("list size " + list.size());
         			System.out.println();
@@ -150,7 +151,8 @@ public class Controller {
         					branchNames.add(branchBuilder.getAllBranches(i).getName());
         				}
         			}
-        			
+        		
+					
         			for(int j=0; j< branchNames.size(); j++) {
         				System.out.print(branchNames.get(j) + "->" + toBranch + ": " + list.get(j) + ", ");
         			}
