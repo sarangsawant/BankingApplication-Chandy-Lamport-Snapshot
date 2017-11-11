@@ -3,21 +3,15 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class Controller {
 
 	Bank.InitBranch.Builder branchBuilder = Bank.InitBranch.newBuilder();
-	
+
 	public static void main(String[] args) {
 		if(args.length != 2){
 			System.out.println("Invalid number of arguments");
@@ -38,90 +32,101 @@ public class Controller {
 
 	}
 	
-	private static class RetriveSnapshotHandler extends Thread {
-        private Socket clientSocket;
-       
-        
-        public RetriveSnapshotHandler(Socket socket) {
-            clientSocket = socket;
-        }
- 
-        public void run() {
-        	
-			
-        }
-    }
-	
 	private void sendRetriveSnapshotMessage() {
 		try {
-			Thread.sleep(4000L);
+			Thread.sleep(12000L);
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
 		}
-		
-		Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
-		Bank.RetrieveSnapshot.Builder retriveBuilder = Bank.RetrieveSnapshot.newBuilder();
-		retriveBuilder.setSnapshotId(1);
-		
-		branchMsgBuilder.setRetrieveSnapshot(retriveBuilder);
-		
-		Socket clientSocket;
-		for(Bank.InitBranch.Branch branch : branchBuilder.getAllBranchesList()) {
-			try {
-				clientSocket = new Socket(branch.getIp(), branch.getPort());
-				OutputStream outputStream = clientSocket.getOutputStream();
-				branchMsgBuilder.build().writeDelimitedTo(outputStream);
+		 int snapshotId = 1;
+		 
+		 while(snapshotId < 6) {
+			 	System.out.println("Sending retrieve snapshot message");
+				Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
+				Bank.RetrieveSnapshot.Builder retriveBuilder = Bank.RetrieveSnapshot.newBuilder();
+				retriveBuilder.setSnapshotId(snapshotId);
 				
-				//new RetriveSnapshotHandler(clientSocket);
-				clientSocket.close();
-			} catch (UnknownHostException e) {
-				e.printStackTrace();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
+				branchMsgBuilder.setRetrieveSnapshot(retriveBuilder);
+				
+				Socket clientSocket;
+				for(Bank.InitBranch.Branch branch : branchBuilder.getAllBranchesList()) {
+					try {
+						clientSocket = new Socket(branch.getIp(), branch.getPort());
+						
+						OutputStream outputStream = clientSocket.getOutputStream();
+						branchMsgBuilder.build().writeDelimitedTo(outputStream);
+						
+						clientSocket.close();
+					} catch (UnknownHostException e) {
+						e.printStackTrace();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				}
+				snapshotId = snapshotId + 1;
+		 }
 		
 	}
 	
 	private void sendInitSnapshotMessageToRandomBranch() {
-		try {
-			Thread.sleep(5000L);
-		} catch (InterruptedException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}
 		
-		//Initiate snapshot message
-		//Map<String, Socket> branchConnections = new HashMap<>();
-		Socket soc = null;
-		int snapshotId = 1;
-		//nextInt(min,max) -> min is inclusive and max is exclusive
-		int randomIndex = ThreadLocalRandom.current().nextInt(0, branchBuilder.getAllBranchesCount());
-		
-		String branchName = branchBuilder.getAllBranches(randomIndex).getName();
-		String ip = branchBuilder.getAllBranches(randomIndex).getIp();
-		int port = branchBuilder.getAllBranches(randomIndex).getPort();
-		
-		System.out.println("Sending Initate snapshot message to " + branchName + " " + ip + " " + port);
-		
-		Bank.InitSnapshot.Builder initSnapshotBuilder = Bank.InitSnapshot.newBuilder();
-		initSnapshotBuilder.setSnapshotId(snapshotId);
-		
-		Bank.BranchMessage.Builder branchMesssageBuilder  = Bank.BranchMessage.newBuilder();
-		branchMesssageBuilder.setInitSnapshot(initSnapshotBuilder);
-		
-		try {
-			soc = new Socket(ip, port);
-			OutputStream outputStream = soc.getOutputStream();
-			branchMesssageBuilder.build().writeDelimitedTo(outputStream);
+		Thread initSnapshotThread = new Thread(){
 			
-			soc.close();
-		} catch (UnknownHostException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+			public void run() {
+				try {
+					Thread.sleep(5000L);
+				} catch (InterruptedException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+				
+				//Initiate snapshot message
+				//Map<String, Socket> branchConnections = new HashMap<>();
+				Socket soc = null;
+				int snapshotId = 1;
+				
+				while(snapshotId < 6) {
+					//nextInt(min,max) -> min is inclusive and max is exclusive
+					int randomIndex = ThreadLocalRandom.current().nextInt(0, branchBuilder.getAllBranchesCount());
+					
+					String branchName = branchBuilder.getAllBranches(randomIndex).getName();
+					String ip = branchBuilder.getAllBranches(randomIndex).getIp();
+					int port = branchBuilder.getAllBranches(randomIndex).getPort();
+					
+					System.out.println("Sending Initate snapshot message to " + branchName + " " + ip + " " + port);
+					
+					Bank.InitSnapshot.Builder initSnapshotBuilder = Bank.InitSnapshot.newBuilder();
+					initSnapshotBuilder.setSnapshotId(snapshotId);
+					
+					Bank.BranchMessage.Builder branchMesssageBuilder  = Bank.BranchMessage.newBuilder();
+					branchMesssageBuilder.setInitSnapshot(initSnapshotBuilder);
+					
+					try {
+						soc = new Socket(ip, port);
+						OutputStream outputStream = soc.getOutputStream();
+						branchMesssageBuilder.build().writeDelimitedTo(outputStream);
+						
+						soc.close();
+					} catch (UnknownHostException e) {
+						e.printStackTrace();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+					snapshotId = snapshotId + 1;
+					
+					//send initiate snapshot after every 2 seconds
+					try {
+						Thread.sleep(150L);
+					} catch (InterruptedException e1) {
+						e1.printStackTrace();
+					}
+					
+				}
+				
+			}
+		};
 		
+		initSnapshotThread.start();
 	}
 	
 	private void parseFileAndInitializeBranches(int amount, String fileName) {
@@ -170,7 +175,7 @@ public class Controller {
 		Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
 		branchMsgBuilder.setInitBranch(branchBuilder);
 		
-		Socket clientSocket;
+		Socket clientSocket = null;
 		for(Bank.InitBranch.Branch branch : branchBuilder.getAllBranchesList()) {
 			try {
 				clientSocket = new Socket(branch.getIp(), branch.getPort());
@@ -183,6 +188,8 @@ public class Controller {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
+			//connectionMap.put(branch.getName(), clientSocket);
+			
 		}
 		
 	}
