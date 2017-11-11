@@ -152,7 +152,7 @@ public class Controller {
         			}
         			
         			for(int j=0; j< branchNames.size(); j++) {
-        				System.out.print(branchNames.get(j) + "->" + toBranch + ":, " + list.get(j) + " ");
+        				System.out.print(branchNames.get(j) + "->" + toBranch + ": " + list.get(j) + ", ");
         			}
         			
         			System.out.println();
@@ -189,7 +189,7 @@ public class Controller {
 				String ipAddress = arr[1];
 				int port = Integer.parseInt(arr[2]);
 				
-				System.out.println(branchName + " " + ipAddress + " " + port);
+				//System.out.println(branchName + " " + ipAddress + " " + port);
 				Bank.InitBranch.Branch.Builder branch = Bank.InitBranch.Branch.newBuilder();
 				branch.setName(branchName);
 				branch.setIp(ipAddress);
@@ -203,7 +203,7 @@ public class Controller {
 		}
 		
 		int branchInitAmt = amount/branchCount;
-		System.out.println("Initial balance for each branch is "+ branchInitAmt);
+		//System.out.println("Initial balance for each branch is "+ branchInitAmt);
 		branchBuilder.setBalance(branchInitAmt);
 
 		Bank.BranchMessage.Builder branchMsgBuilder  = Bank.BranchMessage.newBuilder();
