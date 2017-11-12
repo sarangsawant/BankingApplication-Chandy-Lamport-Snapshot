@@ -82,14 +82,13 @@ public class Controller {
 						branchMesssageBuilder.build().writeDelimitedTo(outputStream);
 						//socket.close();
 						
-						try {
+						/*try {
 							Thread.sleep(1000L);
 						} catch (InterruptedException e1) {
 							e1.printStackTrace();
-						}
+						}*/
 						
 						//System.out.println();
-						//System.out.println("Sending retrieve snapshot message");
 						//retrieve builder
 						branchMesssageBuilder  = Bank.BranchMessage.newBuilder();
 						retrieveBuilder = Bank.RetrieveSnapshot.newBuilder();
@@ -98,6 +97,7 @@ public class Controller {
 						branchMesssageBuilder.setRetrieveSnapshot(retrieveBuilder);
 						
 						for(Bank.InitBranch.Branch branch : branchBuilder.getAllBranchesList()) {
+							//System.out.println("Sending retrieve snapshot message " + branch.getName());
 							socket = Controller.branchConnections.get(branch.getName());
 							outputStream = socket.getOutputStream();
 							branchMesssageBuilder.build().writeDelimitedTo(outputStream);
@@ -138,13 +138,9 @@ public class Controller {
         		Bank.BranchMessage branchMessage = Bank.BranchMessage.parseDelimitedFrom(inputStream);
         		if(branchMessage.hasReturnSnapshot()) {
         			List<Integer> list = branchMessage.getReturnSnapshot().getLocalSnapshot().getChannelStateList();
-        			System.out.println("Size of list " + list.size());
-				List<String> branchNames = new ArrayList<>();
+        			List<String> branchNames = new ArrayList<>();
         			
         			//System.out.println("list size " + list.size());
-        			System.out.println();
-        			System.out.println("snapshot_id: " + branchMessage.getReturnSnapshot().getLocalSnapshot().getSnapshotId());
-        			System.out.print(toBranch + ":" + branchMessage.getReturnSnapshot().getLocalSnapshot().getBalance() +", ");
         			
         			for(int i=0; i<branchBuilder.getAllBranchesCount(); i++) {
         				if(!branchBuilder.getAllBranches(i).getName().equals(toBranch)) {
@@ -152,12 +148,19 @@ public class Controller {
         				}
         			}
         		
-					
-        			for(int j=0; j< branchNames.size(); j++) {
-        				System.out.print(branchNames.get(j) + "->" + toBranch + ": " + list.get(j) + ", ");
+        			if(list.size() == branchNames.size()) {
+        				System.out.println();
+        				System.out.println("snapshot_id: " + branchMessage.getReturnSnapshot().getLocalSnapshot().getSnapshotId());
+        				System.out.print(toBranch + ":" + branchMessage.getReturnSnapshot().getLocalSnapshot().getBalance() +", ");
+        				
+        				for(int j=0; j< branchNames.size(); j++) {
+        					System.out.print(branchNames.get(j) + "->" + toBranch + ": " + list.get(j) + ", ");
+        				}
+        				
+        				System.out.println();
+        			}else {
+        				System.out.println("Snapshot Incomplete");
         			}
-        			
-        			System.out.println();
         		}
 			} catch (IOException e) {
 				e.printStackTrace();

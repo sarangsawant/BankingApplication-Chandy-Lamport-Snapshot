@@ -398,6 +398,13 @@ public class BranchServer {
 	    return channelMap;
 	}
 	
+	private void sleepForOneSecond() {
+		try{
+			Thread.sleep(1000L);
+		}catch(InterruptedException e3){
+			e3.printStackTrace();
+		}	
+	}
 	private Bank.ReturnSnapshot returnSnapshotToController(int snapshotId) {
 		//System.out.println("------------Retrieving snapshot for-:: " + snapshotId);
 		//System.out.println("Size of final channel state map ::" + finalChannelStates.get(snapshotId).size());
@@ -408,15 +415,13 @@ public class BranchServer {
 		//localBuilder.setBalance(branchState.get(snapshotId));
 	
 		//Wait till snapshot finishes
-		while(finalChannelStates.get(snapshotId) == null && finalChannelStates.get(snapshotId).size() != map.size()){
-		
-			try{
-				Thread.sleep(1000L);
-			}catch(InterruptedException e3){
-				e3.printStackTrace();
-			}	
-
+		while(finalChannelStates.get(snapshotId) == null) { 
+			sleepForOneSecond();
 		}	
+		while(finalChannelStates.get(snapshotId).size() != map.size()){
+			sleepForOneSecond();
+		}
+
 		localBuilder.setBalance(branchState.get(snapshotId));
 		//System.out.println(branchName + ": " + branchState.get(snapshotId));
 		Map<String, Integer> channelMap = finalChannelStates.get(snapshotId);
