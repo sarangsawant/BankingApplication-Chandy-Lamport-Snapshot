@@ -33,7 +33,7 @@ public class BranchServer {
 	private final Object lock = new Object();
 	
 	private ConcurrentHashMap<Integer, Integer> branchState = new ConcurrentHashMap<>();
-	private ConcurrentHashMap<Integer, Map<String, Integer>> incomingChannelStates = new ConcurrentHashMap<>();
+	private Map<Integer, Map<String, Integer>> incomingChannelStates = new HashMap<>();
 	private ConcurrentHashMap<Integer, Map<String, Integer>> finalChannelStates = new ConcurrentHashMap<>();
 	
 	@SuppressWarnings("resource")
@@ -290,15 +290,15 @@ public class BranchServer {
 	private void receiveMarkerMessage(int snapshotId, String fromBranch) {
 		
 		//If Key is present, first marker message already received
-		if(branchState.get(snapshotId) != null){
+		if(incomingChannelStates.get(snapshotId) != null){
 			//System.out.println();
-			//System.out.println("------------Received marker from-------- " + fromBranch );
+			System.out.println("------------Received marker from-------- " + fromBranch + " " + snapshotId );
 			recordFinalChannelStateAndStopRecording(snapshotId,fromBranch);
 			
 		}else {
 			//First Marker message
 			//System.out.println();
-			//System.out.println("-------------My First Marker message--------from " +snapshotId + ":" + fromBranch);
+			System.out.println("-------------My First Marker message--------from "+ fromBranch + ":" + +snapshotId);
 			//Record local state
 			recordLocalState(snapshotId);
 			
@@ -336,7 +336,7 @@ public class BranchServer {
 			
 			
 			//stop recording i.e remove entry from incomingChannelStates
-			incomingChannelStates.get(snapshotId).remove(fromBranch);
+			//incomingChannelStates.get(snapshotId).remove(fromBranch);
 		}
 	}
 	
