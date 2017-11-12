@@ -73,7 +73,7 @@ public class Controller {
 					branchMesssageBuilder.setInitSnapshot(initSnapshotBuilder);
 					
 					//System.out.println();
-					System.out.println("Sending initiate snapshot message " + name + " " + snapshotId);
+					//System.out.println("Sending initiate snapshot message " + name + " " + snapshotId);
 					try {
 						socket = Controller.branchConnections.get(name);
 						outputStream = socket.getOutputStream();
@@ -82,6 +82,7 @@ public class Controller {
 						branchMesssageBuilder.build().writeDelimitedTo(outputStream);
 						//socket.close();
 						
+						//Wait till snapshot completes
 						try {
 							Thread.sleep(1000L);
 						} catch (InterruptedException e1) {

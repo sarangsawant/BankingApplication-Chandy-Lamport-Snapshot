@@ -9,5 +9,5 @@ Steps to execute code:
 ----------------------------------
 1. Execuring ./controller.sh, controller sends init branch message to all branches.
 2. After every 2sec interval, controller sends InitSnapshot message to one of the randomly selected branch(SnapshotId starting with 1).
-3. For each initSnapshot message send by controller, this message is followed by Retrieve snapshot message to all branches. Controller waits for Return snapshot message
+3. For each initSnapshot message send by controller, this message is followed by Retrieve snapshot messages to all branches. Controller waits for Return snapshot message
    from all branches in different thread

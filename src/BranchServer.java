@@ -77,7 +77,6 @@ public class BranchServer {
 			while(true) {
 				try {
 						Socket socket = serverSocket.accept();
-						//System.out.println("connection accepted");
 						if(flag == 0) {
 							BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 							String name = in.readLine();
@@ -88,19 +87,7 @@ public class BranchServer {
 							//Start listening for messages and then start money transfer
 							new BranchHandler(socket,branchServer, name).start();
 							branchServer.syncTCPConnectionsAndStartMoneyTransfer();	
-						}/*else {
-							Bank.BranchMessage msg = Bank.BranchMessage.parseDelimitedFrom(socket.getInputStream());
-							
-							if(msg.hasInitSnapshot()){
-								System.out.println("------\nReceived snapshot message from controller:::" + msg.getInitSnapshot().getSnapshotId() +"--------");
-								new ControllerHandler(socket, branchServer).start();
-								//branchServer.initiateLocalSnapshotProcedure(msg.getInitSnapshot().getSnapshotId());
-							}
-							
-							if(msg.hasRetrieveSnapshot()) {
-								branchServer.returnSnapshotToController(msg.getRetrieveSnapshot().getSnapshotId());
-							}
-						}*/
+						}
 						
 				} catch (IOException e) {
 					e.printStackTrace();
@@ -292,13 +279,13 @@ public class BranchServer {
 		//If Key is present, first marker message already received
 		if(incomingChannelStates.get(snapshotId) != null){
 			//System.out.println();
-			System.out.println("------------Received marker from-------- " + fromBranch + " " + snapshotId );
+			//System.out.println("------------Received marker from-------- " + fromBranch + " " + snapshotId );
 			recordFinalChannelStateAndStopRecording(snapshotId,fromBranch);
 			
 		}else {
 			//First Marker message
 			//System.out.println();
-			System.out.println("-------------My First Marker message--------from "+ fromBranch + ":" + +snapshotId);
+			//System.out.println("-------------My First Marker message--------from "+ fromBranch + ":" + +snapshotId);
 			//Record local state
 			recordLocalState(snapshotId);
 			
@@ -318,22 +305,17 @@ public class BranchServer {
 	}
 	
 	private void recordFinalChannelStateAndStopRecording(int snapshotId, String fromBranch) {
-		//System.out.println("-----==copying to final==-----");
 		Map<String, Integer> incomingChannelMap; 
 		if(finalChannelStates.get(snapshotId) == null) {
 			incomingChannelMap = new HashMap<>();
 			finalChannelStates.put(snapshotId, incomingChannelMap);
 		}
-		//System.out.println("Size of final map before " + finalChannelStates.get(snapshotId).size());
 		
 		if(incomingChannelStates.get(snapshotId) != null) {
 			int recordedBalance = incomingChannelStates.get(snapshotId).get(fromBranch);
 			
 			//copy final state after recording is stopped.
 			finalChannelStates.get(snapshotId).put(fromBranch, recordedBalance);
-			//printChannelMap(finalChannelStates.get(snapshotId), snapshotId);
-			//System.out.println("Size of final map after " + finalChannelStates.get(snapshotId).size());
-			
 			
 			//stop recording i.e remove entry from incomingChannelStates
 			//incomingChannelStates.get(snapshotId).remove(fromBranch);
@@ -376,7 +358,6 @@ public class BranchServer {
 			Map<String, Integer> incomingChannelMap = getInitializeMap();
 			incomingChannelStates.put(snapshotId, incomingChannelMap);
 		}
-		//printChannelMap(incomingChannelStates.get(snapshotId));
 	}
 	
 	/**
@@ -406,8 +387,6 @@ public class BranchServer {
 		}	
 	}
 	private Bank.ReturnSnapshot returnSnapshotToController(int snapshotId) {
-		//System.out.println("------------Retrieving snapshot for-:: " + snapshotId);
-		//System.out.println("Size of final channel state map ::" + finalChannelStates.get(snapshotId).size());
 		Bank.ReturnSnapshot.Builder returnBuilder = Bank.ReturnSnapshot.newBuilder();
 		
 		Bank.ReturnSnapshot.LocalSnapshot.Builder localBuilder = Bank.ReturnSnapshot.LocalSnapshot.newBuilder();
@@ -423,13 +402,11 @@ public class BranchServer {
 		}
 
 		localBuilder.setBalance(branchState.get(snapshotId));
-		//System.out.println(branchName + ": " + branchState.get(snapshotId));
 		Map<String, Integer> channelMap = finalChannelStates.get(snapshotId);
 		
 		List<Integer> list = new ArrayList<>();
 		for(Bank.InitBranch.Branch branch : allBranchDetails.getInitBranch().getAllBranchesList()) {
 			if(channelMap.get(branch.getName()) != null) {
-				//System.out.println(branchName + "<-" + branch.getName() + ":" + channelMap.get(branch.getName()));
 				
 				if(channelMap.get(branch.getName()) == -1)
 					list.add(0);
